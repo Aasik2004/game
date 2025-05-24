@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cool Car Game - Enhanced Realistic Cars</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron&display=swap');
+  body, html {
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(to bottom, #0a0f2f 0%, #060919 100%);
+    overflow: hidden;
+    font-family: 'Orbitron', sans-serif;
+    color: #0ff;
+    user-select: none;
+  }
+  #gameContainer {
+    position: relative;
+    margin: 20px auto;
+    width: 400px;
+    height: 600px;
+    background: #222;
+    box-shadow: 0 0 40px #0ff;
+    border-radius: 15px;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    background: linear-gradient(to bottom, #444 0%, #222 100%);
+    margin: 0 auto;
+    border-radius: 15px;
+  }
+  #scoreBoard {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-size: 22px;
+    text-shadow: 0 0 8px #0ff;
+  }
+  #messageScreen {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.85);
+    top: 0; left: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: #0ff;
+    font-size: 28px;
+    padding: 20px;
+    box-sizing: border-box;
+    border-radius: 15px;
+    backdrop-filter: blur(4px);
+  }
+  #messageScreen button {
+    margin-top: 30px;
+    background-color: #0ff;
+    border: none;
+    color: #022;
+    font-size: 22px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-family: 'Orbitron', sans-serif;
+  }
+  #messageScreen button:hover {
+    background-color: #06c;
+    color: white;
+  }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
+  <div id="scoreBoard">Score: 0</div>
+  <div id="messageScreen">
+    <div id="messageText">Press Start to Play</div>
+    <button id="startButton">Start Game</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const scoreBoard = document.getElementById('scoreBoard');
+  const messageScreen = document.getElementById('messageScreen');
+  const messageText = document.getElementById('messageText');
+  const startButton = document.getElementById('startButton');
+
+  const laneCount = 3;
+  const laneWidth = canvas.width / laneCount;
+  const roadMarkWidth = 10;
+  const roadMarkHeight = 50;
+  const roadMarkSpacing = 20;
+
+  // Player car properties
+  const carWidth = 50;
+  const carHeight = 100;
+  let playerX;
+  let playerLane = 1; // lanes: 0,1,2
+  const playerY = canvas.height - carHeight - 20;
+
+  // Obstacles
+  const obstacleWidth = 50;
+  const obstacleHeight = 100;
+  let obstacles = [];
+  let obstacleSpeed = 5;
+  let spawnInterval = 1500; // ms
+  let lastSpawnTime = 0;
+
+  // Game state
+  let score = 0;
+  let gameRunning = false;
+  let keys = {};
+
+  // Road moving markers
+  let roadMarkY = 0;
+
+  // Helper to draw rounded rectangle with optional fill and stroke
+  function roundedRect(ctx, x, y, w, h, r, fillStyle, strokeStyle, lineWidth = 2) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+
+    if (fillStyle) {
+      ctx.fillStyle = fillStyle;
+      ctx.fill();
+    }
+    if (strokeStyle) {
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+  }
+
+  // Draw player car - detailed realistic top-down car with shadows and lights
+  function drawPlayerCar(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Main body gradient dark blue with highlights
+    let bodyGradient = ctx.createLinearGradient(0, 0, 0, carHeight);
+    bodyGradient.addColorStop(0, '#0a74da');
+    bodyGradient.addColorStop(0.5, '#004a99');
+    bodyGradient.addColorStop(1, '#002244');
+
+    roundedRect(ctx, 0, 0, carWidth, carHeight, 12, bodyGradient, '#001a3c', 3);
+
+    // Roof - lighter blue with reflection
+    let roofHeight = carHeight * 0.4;
+    let roofGradient = ctx.createLinearGradient(0, 0, 0, roofHeight);
+    roofGradient.addColorStop(0, '#66b3ff');
+    roofGradient.addColorStop(1, '#005bb5');
+
+    roundedRect(ctx, carWidth * 0.15, carHeight * 0.1, carWidth * 0.7, roofHeight, 10, roofGradient, '#003366', 2);
+
+    // Windows - reflective glass gradient
+    let windowGradient = ctx.createLinearGradient(0, 0, 0, roofHeight);
+    windowGradient.addColorStop(0, 'rgba(190, 220, 255, 0.9)');
+    windowGradient.addColorStop(1, 'rgba(70, 130, 180, 0.4)');
+
+    // Front windshield trapezoid
+    ctx.beginPath();
+    ctx.moveTo(carWidth * 0.25, carHeight * 0.13);
+    ctx.lineTo(carWidth * 0.75, carHeight * 0.13);
+    ctx.lineTo(carWidth * 0.7, carHeight * 0.35);
+    ctx.lineTo(carWidth * 0.3, carHeight * 0.35);
+    ctx.closePath();
+    ctx.fillStyle = windowGradient;
+    ctx.fill();
+    ctx.strokeStyle = '#99ccff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Side windows
+    ctx.fillStyle = windowGradient;
+    ctx.fillRect(carWidth * 0.18, carHeight * 0.4, carWidth * 0.22, carHeight * 0.3);
+    ctx.fillRect(carWidth * 0.6, carHeight * 0.4, carWidth * 0.22, carHeight * 0.3);
+    ctx.strokeRect(carWidth * 0.18, carHeight * 0.4, carWidth * 0.22, carHeight * 0.3);
+    ctx.strokeRect(carWidth * 0.6, carHeight * 0.4, carWidth * 0.22, carHeight * 0.3);
+
+    // Doors separation lines
+    ctx.strokeStyle = '#003366';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(carWidth * 0.5, carHeight * 0.1);
+    ctx.lineTo(carWidth * 0.5, carHeight * 0.7);
+    ctx.stroke();
+
+    // Door handles
+    ctx.fillStyle = '#003366';
+    const handleW = 6;
+    const handleH = 2.5;
+    ctx.fillRect(carWidth * 0.38, carHeight * 0.48, handleW, handleH);
+    ctx.fillRect(carWidth * 0.62, carHeight * 0.48, handleW, handleH);
+
+    // Wheels - detailed black with shine and spokes
+    const wheelRadius = 11;
+    const wheelPositions = [
+      { x: carWidth * 0.25, y: carHeight * 0.1 - 2 },
+      { x: carWidth * 0.75, y: carHeight * 0.1 - 2 },
+      { x: carWidth * 0.25, y: carHeight - wheelRadius - 3 },
+      { x: carWidth * 0.75, y: carHeight - wheelRadius - 3 },
+    ];
+
+    wheelPositions.forEach(({x, y}) => {
+      // Tire
+      ctx.beginPath();
+      ctx.fillStyle = '#111';
+      ctx.shadowColor = 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur = 4;
+      ctx.arc(x, y, wheelRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Rim base
+      let rimGradient = ctx.createRadialGradient(x, y, wheelRadius * 0.2, x, y, wheelRadius);
+      rimGradient.addColorStop(0, '#ddd');
+      rimGradient.addColorStop(1, '#555');
+      ctx.fillStyle = rimGradient;
+      ctx.beginPath();
+      ctx.arc(x, y, wheelRadius * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spokes
+      ctx.strokeStyle = '#bbb';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const spokeCount = 8;
+      for(let i=0; i<spokeCount; i++) {
+        const angle = (i / spokeCount) * Math.PI * 2;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle) * wheelRadius * 0.7, y + Math.sin(angle) * wheelRadius * 0.7);
+      }
+      ctx.stroke();
+    });
+
+    // Headlights - realistic look yellowish ellipse with glow
+    const headlightGradient = ctx.createRadialGradient(carWidth * 0.2, carHeight * 0.92, 3, carWidth * 0.2, carHeight * 0.92, 10);
+    headlightGradient.addColorStop(0, 'rgba(255,255,150,0.9)');
+    headlightGradient.addColorStop(1, 'rgba(255,255,150,0)');
+    ctx.fillStyle = headlightGradient;
+    ctx.beginPath();
+    ctx.ellipse(carWidth * 0.2, carHeight * 0.92, 9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const headlightGradientRight = ctx.createRadialGradient(carWidth * 0.8, carHeight * 0.92, 3, carWidth * 0.8, carHeight * 0.92, 10);
+    headlightGradientRight.addColorStop(0, 'rgba(255,255,150,0.9)');
+    headlightGradientRight.addColorStop(1, 'rgba(255,255,150,0)');
+    ctx.fillStyle = headlightGradientRight;
+    ctx.beginPath();
+    ctx.ellipse(carWidth * 0.8, carHeight * 0.92, 9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rear spoiler subtle highlight
+    ctx.fillStyle = 'rgba(0, 115, 218, 0.8)';
+    ctx.beginPath();
+    ctx.moveTo(carWidth * 0.15, carHeight * 0.85);
+    ctx.lineTo(carWidth * 0.85, carHeight * 0.85);
+    ctx.lineTo(carWidth * 0.75, carHeight * 0.95);
+    ctx.lineTo(carWidth * 0.25, carHeight * 0.95);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Draw obstacle car - detailed realistic top-down red car
+  function drawObstacleCar(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Main body gradient red with highlights and shadows
+    let bodyGradient = ctx.createLinearGradient(0, 0, 0, obstacleHeight);
+    bodyGradient.addColorStop(0, '#cc3333');
+    bodyGradient.addColorStop(0.5, '#990000');
+    bodyGradient.addColorStop(1, '#660000');
+
+    roundedRect(ctx, 0, 0, obstacleWidth, obstacleHeight, 12, bodyGradient, '#440000', 3);
+
+    // Roof - lighter red with reflection
+    let roofHeight = obstacleHeight * 0.4;
+    let roofGradient = ctx.createLinearGradient(0, 0, 0, roofHeight);
+    roofGradient.addColorStop(0, '#ff6666');
+    roofGradient.addColorStop(1, '#9b1c1c');
+
+    roundedRect(ctx, obstacleWidth * 0.15, obstacleHeight * 0.1, obstacleWidth * 0.7, roofHeight, 10, roofGradient, '#660000', 2);
+
+    // Windows - glass reflection effect
+    let windowGradient = ctx.createLinearGradient(0, 0, 0, roofHeight);
+    windowGradient.addColorStop(0, 'rgba(255, 200, 200, 0.9)');
+    windowGradient.addColorStop(1, 'rgba(120, 40, 40, 0.5)');
+
+    // Front windshield trapezoid
+    ctx.beginPath();
+    ctx.moveTo(obstacleWidth * 0.25, obstacleHeight * 0.13);
+    ctx.lineTo(obstacleWidth * 0.75, obstacleHeight * 0.13);
+    ctx.lineTo(obstacleWidth * 0.7, obstacleHeight * 0.35);
+    ctx.lineTo(obstacleWidth * 0.3, obstacleHeight * 0.35);
+    ctx.closePath();
+    ctx.fillStyle = windowGradient;
+    ctx.fill();
+    ctx.strokeStyle = '#cc9999';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Side windows
+    ctx.fillStyle = windowGradient;
+    ctx.fillRect(obstacleWidth * 0.18, obstacleHeight * 0.4, obstacleWidth * 0.22, obstacleHeight * 0.3);
+    ctx.fillRect(obstacleWidth * 0.6, obstacleHeight * 0.4, obstacleWidth * 0.22, obstacleHeight * 0.3);
+    ctx.strokeRect(obstacleWidth * 0.18, obstacleHeight * 0.4, obstacleWidth * 0.22, obstacleHeight * 0.3);
+    ctx.strokeRect(obstacleWidth * 0.6, obstacleHeight * 0.4, obstacleWidth * 0.22, obstacleHeight * 0.3);
+
+    // Door lines
+    ctx.strokeStyle = '#660000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(obstacleWidth * 0.5, obstacleHeight * 0.1);
+    ctx.lineTo(obstacleWidth * 0.5, obstacleHeight * 0.7);
+    ctx.stroke();
+
+    // Door handles
+    ctx.fillStyle = '#660000';
+    const handleW = 6;
+    const handleH = 2.5;
+    ctx.fillRect(obstacleWidth * 0.38, obstacleHeight * 0.48, handleW, handleH);
+    ctx.fillRect(obstacleWidth * 0.62, obstacleHeight * 0.48, handleW, handleH);
+
+    // Wheels - black with detailed shading and spokes
+    const wheelRadius = 11;
+    const wheelPositions = [
+      { x: obstacleWidth * 0.25, y: obstacleHeight * 0.1 - 2 },
+      { x: obstacleWidth * 0.75, y: obstacleHeight * 0.1 - 2 },
+      { x: obstacleWidth * 0.25, y: obstacleHeight - wheelRadius - 3 },
+      { x: obstacleWidth * 0.75, y: obstacleHeight - wheelRadius - 3 },
+    ];
+
+    wheelPositions.forEach(({x, y}) => {
+      // Tire
+      ctx.beginPath();
+      ctx.fillStyle = '#111';
+      ctx.shadowColor = 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur = 4;
+      ctx.arc(x, y, wheelRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Rim base
+      let rimGradient = ctx.createRadialGradient(x, y, wheelRadius * 0.2, x, y, wheelRadius);
+      rimGradient.addColorStop(0, '#cc5555');
+      rimGradient.addColorStop(1, '#661111');
+      ctx.fillStyle = rimGradient;
+      ctx.beginPath();
+      ctx.arc(x, y, wheelRadius * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spokes
+      ctx.strokeStyle = '#aa6666';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const spokeCount = 8;
+      for(let i=0; i<spokeCount; i++) {
+        const angle = (i / spokeCount) * Math.PI * 2;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle) * wheelRadius * 0.7, y + Math.sin(angle) * wheelRadius * 0.7);
+      }
+      ctx.stroke();
+    });
+
+    // Headlights front corners with glow
+    const headlightGradient = ctx.createRadialGradient(obstacleWidth * 0.2, obstacleHeight * 0.92, 3, obstacleWidth * 0.2, obstacleHeight * 0.92, 10);
+    headlightGradient.addColorStop(0, 'rgba(255,220,200,0.95)');
+    headlightGradient.addColorStop(1, 'rgba(255,220,200,0)');
+    ctx.fillStyle = headlightGradient;
+    ctx.beginPath();
+    ctx.ellipse(obstacleWidth * 0.2, obstacleHeight * 0.92, 9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const headlightGradientRight = ctx.createRadialGradient(obstacleWidth * 0.8, obstacleHeight * 0.92, 3, obstacleWidth * 0.8, obstacleHeight * 0.92, 10);
+    headlightGradientRight.addColorStop(0, 'rgba(255,220,200,0.95)');
+    headlightGradientRight.addColorStop(1, 'rgba(255,220,200,0)');
+    ctx.fillStyle = headlightGradientRight;
+    ctx.beginPath();
+    ctx.ellipse(obstacleWidth * 0.8, obstacleHeight * 0.92, 9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rear spoiler highlight
+    ctx.fillStyle = 'rgba(204, 51, 51, 0.8)';
+    ctx.beginPath();
+    ctx.moveTo(obstacleWidth * 0.15, obstacleHeight * 0.85);
+    ctx.lineTo(obstacleWidth * 0.85, obstacleHeight * 0.85);
+    ctx.lineTo(obstacleWidth * 0.75, obstacleHeight * 0.95);
+    ctx.lineTo(obstacleWidth * 0.25, obstacleHeight * 0.95);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Draw road lane markings
+  function drawRoad() {
+    // Road background
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Side borders
+    ctx.fillStyle = '#00ffee';
+    ctx.fillRect(0, 0, 10, canvas.height);
+    ctx.fillRect(canvas.width - 10, 0, 10, canvas.height);
+
+    // Lane dividers
+    ctx.strokeStyle = '#00ffee';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([40, 30]);
+    for(let i = 1; i < laneCount; i++) {
+      const x = i * laneWidth;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Moving road marks center lane
+    ctx.fillStyle = '#00ffcc';
+    let markY = roadMarkY % (roadMarkHeight + roadMarkSpacing) - (roadMarkHeight + roadMarkSpacing);
+    for (let y = markY; y < canvas.height; y += roadMarkHeight + roadMarkSpacing) {
+      const center = canvas.width / 2;
+      ctx.fillRect(center - roadMarkWidth/2, y, roadMarkWidth, roadMarkHeight);
+    }
+  }
+
+  // Update player position based on lane
+  function updatePlayerPosition() {
+    playerX = playerLane * laneWidth + (laneWidth - carWidth) / 2;
+  }
+
+  // Generate a new obstacle car randomly in any lane
+  function spawnObstacle() {
+    const lane = Math.floor(Math.random() * laneCount);
+    const x = lane * laneWidth + (laneWidth - obstacleWidth) / 2;
+    obstacles.push({x, y: -obstacleHeight, lane});
+  }
+
+  // Detect collision between player and obstacles
+  function detectCollision(rect1, rect2) {
+    return !(
+      rect1.x > rect2.x + rect2.width ||
+      rect1.x + rect1.width < rect2.x ||
+      rect1.y > rect2.y + rect2.height ||
+      rect1.y + rect1.height < rect2.y
+    );
+  }
+
+  // Game over handler
+  function gameOver() {
+    gameRunning = false;
+    messageText.textContent = `Game Over! Your score: ${score}`;
+    startButton.textContent = 'Restart Game';
+    messageScreen.style.display = 'flex';
+  }
+
+  // Game loop
+  function gameLoop(timestamp) {
+    if (!gameRunning) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawRoad();
+
+    // Move road marks
+    roadMarkY += obstacleSpeed;
+
+    // Update obstacles position
+    obstacles.forEach(ob => {
+      ob.y += obstacleSpeed;
+    });
+
+    // Remove obstacles that passed beyond canvas
+    obstacles = obstacles.filter(ob => ob.y < canvas.height + obstacleHeight);
+
+    // Draw obstacles
+    obstacles.forEach(ob => drawObstacleCar(ob.x, ob.y));
+
+    // Draw player car
+    updatePlayerPosition();
+    drawPlayerCar(playerX, playerY);
+
+    // Detect collisions
+    const playerRect = { x: playerX, y: playerY, width: carWidth, height: carHeight };
+    for (let ob of obstacles) {
+      const obRect = { x: ob.x, y: ob.y, width: obstacleWidth, height: obstacleHeight };
+      if (detectCollision(playerRect, obRect)) {
+        gameOver();
+        return;
+      }
+    }
+
+    // Spawn obstacles every spawnInterval
+    if (!lastSpawnTime) lastSpawnTime = timestamp;
+    if (timestamp - lastSpawnTime > spawnInterval) {
+      spawnObstacle();
+      lastSpawnTime = timestamp;
+      // Increase difficulty slightly
+      if (score % 100 === 0 && spawnInterval > 700) {
+        spawnInterval -= 50;
+        obstacleSpeed += 0.1;
+      }
+    }
+
+    // Update score
+    score += 1;
+    scoreBoard.textContent = 'Score: ' + score;
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Listen to keyboard
+  window.addEventListener('keydown', (e) => {
+    if (!gameRunning) return;
+    if (e.key === 'ArrowLeft' || e.key === 'a') {
+      playerLane = Math.max(0, playerLane - 1);
+    }
+    else if (e.key === 'ArrowRight' || e.key === 'd') {
+      playerLane = Math.min(laneCount - 1, playerLane + 1);
+    }
+  });
+
+  // Start or restart the game
+  function startGame() {
+    obstacles = [];
+    playerLane = 1;
+    roadMarkY = 0;
+    obstacleSpeed = 5;
+    spawnInterval = 1500;
+    score = 0;
+    lastSpawnTime = 0;
+    scoreBoard.textContent = "Score: 0";
+    messageScreen.style.display = 'none';
+    gameRunning = true;
+    requestAnimationFrame(gameLoop);
+  }
+
+  startButton.addEventListener('click', startGame);
+})();
+</script>
+</body>
+</html>
